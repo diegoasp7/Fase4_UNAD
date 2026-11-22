@@ -1,0 +1,113 @@
+"""Punto de entrada. Ejecute python main.py o python main.py --demo."""
+import logging
+import sys
+from pathlib import Path
+
+from gestion import Gestion
+from modelos import DatoInvalido, ErrorSistema, OperacionInvalida
+
+
+def ejecutar(nombre, funcion, *args):
+    """Cada acción tiene su propia frontera de errores y su registro de cierre."""
+    try:
+        resultado = funcion(*args)
+    except ErrorSistema as error:
+        logging.exception("Operación rechazada: %s", nombre)
+        print(f"[Rechazada] {nombre}. {error}")
+        return type(error), ""
+    except Exception as error:
+        logging.exception("Fallo inesperado: %s", nombre)
+        print(f"[Error] {nombre}. {error}")
+        return type(error), ""
+    else:
+        logging.info("Operación correcta: %s", nombre)
+        print(resultado)
+        return None, resultado
+    finally:
+        logging.info("Fin de operación: %s", nombre)
+
+
+def demostracion():
+    g = Gestion()
+    casos = [
+        ("Alta de cliente", g.cliente, ("C1", "Ana Ruiz", "ana@example.com"), None),
+        ("Correo incorrecto", g.cliente, ("C2", "Luis", "luis@"), DatoInvalido),
+        ("Cliente duplicado", g.cliente, ("c1", "Ana Ruiz", "ana@example.com"), OperacionInvalida),
+        ("Alta de sala", g.servicio, ("S1", "sala", 20000), None),
+        ("Alta de equipo", g.servicio, ("E1", "equipo", 10000), None),
+        ("Alta de asesoría", g.servicio, ("A1", "asesoria", 40000), None),
+        ("Tarifa ilegible", g.servicio, ("E2", "equipo", "abc"), DatoInvalido),
+        ("Servicio sin tarifa", g.servicio, ("E2", "equipo"), TypeError),
+        ("Duración inválida", g.reservar, ("R1", "C1", "S1", 13), DatoInvalido),
+        ("Descuento inválido", g.reservar, ("R1", "C1", "S1", 2, 101), DatoInvalido),
+        ("Reservar sala", g.reservar, ("R1", "C1", "S1", 2, 10, 19), None),
+        ("Sala ocupada", g.reservar, ("R2", "C1", "S1", 1), OperacionInvalida),
+        ("Procesar antes de confirmar", g.cambiar, ("R1", "procesar"), OperacionInvalida),
+        ("Confirmar sala", g.cambiar, ("R1", "confirmar"), None),
+        ("Procesar sala", g.cambiar, ("R1", "procesar"), None),
+        ("Reutilizar sala", g.reservar, ("R2", "C1", "S1", 1), None),
+        ("Cancelar sala", g.cambiar, ("R2", "cancelar"), None),
+        ("Reservar equipo", g.reservar, ("R3", "C1", "E1", 2), None),
+        ("Reservar asesoría", g.reservar, ("R4", "C1", "A1", 0.5), None),
+    ]
+    aciertos = 0
+    for i, (nombre, funcion, args, esperado) in enumerate(casos, 1):
+        print(f"\n{i}. {nombre}")
+        error, _ = ejecutar(nombre, funcion, *args)
+        aciertos += error is esperado
+    print(f"\n{aciertos}/{len(casos)} operaciones con el resultado esperado.")
+    return aciertos == len(casos)
+
+
+def menu():
+    g = Gestion()
+    acciones = {
+        "1": ("Registrar cliente", g.cliente, ("Código", "Nombre", "Correo")),
+        "2": ("Crear servicio", g.servicio, ("Código", "Tipo (sala/equipo/asesoria)", "Tarifa COP/h")),
+        "3": ("Reservar", g.reservar, ("Código reserva", "Código cliente", "Código servicio",
+                                      "Horas", "Descuento % (0 si no aplica)", "Impuesto % (0 si no aplica)")),
+        "4": ("Cambiar estado", g.cambiar, ("Código reserva", "Acción (confirmar/cancelar/procesar)")),
+        "5": ("Consultar registros", g.listar, ()),
+    }
+    while True:
+        print("\nSoftware FJ")
+        for numero, (nombre, _, _) in acciones.items():
+            print(numero, nombre)
+        print("6 Demostración independiente\n0 Salir")
+        opcion = input("Opción: ").strip()
+        if opcion == "0":
+            return
+        if opcion == "6":
+            demostracion()
+        elif opcion in acciones:
+            nombre, funcion, campos = acciones[opcion]
+            valores = [input(f"{campo}: ").strip() for campo in campos]
+            ejecutar(nombre, funcion, *valores)
+        else:
+            logging.warning("Opción de menú inválida")
+            print("Seleccione una opción del 0 al 6.")
+
+
+def main():
+    ruta = Path(__file__).with_name("software_fj.log")
+    try:
+        logging.basicConfig(filename=ruta, encoding="utf-8", level=logging.INFO,
+                            format="%(asctime)s %(levelname)s %(message)s")
+    except OSError as error:
+        logging.basicConfig(level=logging.INFO)
+        logging.exception("Archivo de registro inaccesible")
+        print(f"Registro enviado a la consola: {error}")
+    logging.info("Inicio de sesión")
+    try:
+        if "--demo" in sys.argv:
+            return 0 if demostracion() else 1
+        menu()
+    except (EOFError, KeyboardInterrupt):
+        print("\nSesión finalizada.")
+    finally:
+        logging.info("Fin de sesión")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
