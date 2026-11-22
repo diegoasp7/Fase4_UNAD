@@ -1,0 +1,63 @@
+"""Catálogo y reservas en memoria para una sesión de trabajo."""
+from modelos import Asesoria, Cliente, DatoInvalido, Equipo, OperacionInvalida, Reserva, Sala, texto
+
+
+class Gestion:
+    tipos = {"sala": Sala, "equipo": Equipo, "asesoria": Asesoria}
+
+    def __init__(self):
+        self._clientes = []
+        self._servicios = []
+        self._reservas = []
+
+    @staticmethod
+    def _guardar(lista, entidad):
+        if any(elem.codigo == entidad.codigo for elem in lista):
+            raise OperacionInvalida("El código ya está registrado.")
+        lista.append(entidad)
+        return entidad.describir()
+
+    @staticmethod
+    def _buscar(lista, codigo):
+        codigo = texto(codigo, "código").upper()
+        for elem in lista:
+            if elem.codigo == codigo:
+                return elem
+        raise OperacionInvalida(f"No existe el código {codigo} en este catálogo.")
+
+    def cliente(self, codigo, nombre, correo):
+        return self._guardar(self._clientes, Cliente(codigo, nombre, correo))
+
+    def servicio(self, codigo, tipo, tarifa):
+        clase = self.tipos.get(texto(tipo, "tipo").lower())
+        if clase is None:
+            raise DatoInvalido("Tipos disponibles: sala, equipo y asesoria.")
+        return self._guardar(self._servicios, clase(codigo, tarifa))
+
+    def reservar(self, codigo, cliente, servicio, horas, descuento=0, impuesto=0):
+        titular = self._buscar(self._clientes, cliente)
+        recurso = self._buscar(self._servicios, servicio)
+        if any(r.servicio is recurso and r.estado in ("Pendiente", "Confirmada")
+               for r in self._reservas):
+            raise OperacionInvalida("El servicio tiene una reserva activa.")
+        nueva = Reserva(codigo, titular, recurso, horas, descuento, impuesto)
+        return self._guardar(self._reservas, nueva)
+
+    def cambiar(self, codigo, accion):
+        reserva = self._buscar(self._reservas, codigo)
+        acciones = {"confirmar": reserva.confirmar, "cancelar": reserva.cancelar,
+                    "procesar": reserva.procesar}
+        if accion not in acciones:
+            raise DatoInvalido("Acción de reserva desconocida.")
+        acciones[accion]()
+        return reserva.describir()
+
+    def listar(self):
+        filas = []
+        for titulo, lista in (("Clientes", self._clientes), ("Servicios", self._servicios),
+                              ("Reservas", self._reservas)):
+            filas.append(titulo)
+            filas.extend(elem.describir() for elem in lista)
+            if not lista:
+                filas.append("  Sin registros")
+        return "\n".join(filas)
