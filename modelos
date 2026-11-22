@@ -1,0 +1,152 @@
+"""Modelo de dominio de Software FJ. Todos los importes se expresan en COP."""
+from abc import ABC, abstractmethod
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+import re
+
+
+class ErrorSistema(Exception):
+    """Error de negocio que permite continuar con la siguiente operación."""
+
+
+class DatoInvalido(ErrorSistema):
+    pass
+
+
+class OperacionInvalida(ErrorSistema):
+    pass
+
+
+def texto(valor, campo):
+    if not isinstance(valor, str) or not valor.strip() or not valor.isprintable():
+        raise DatoInvalido(f"Revise el campo {campo}.")
+    return valor.strip()
+
+
+def numero(valor, campo, minimo, maximo):
+    try:
+        resultado = Decimal(str(valor))
+    except InvalidOperation as causa:
+        raise DatoInvalido(f"{campo} debe ser numérico.") from causa
+    if not resultado.is_finite() or not minimo <= resultado <= maximo:
+        raise DatoInvalido(f"{campo} debe estar entre {minimo} y {maximo}.")
+    return resultado
+
+
+class Entidad(ABC):
+    def __init__(self, codigo):
+        self.__codigo = texto(codigo, "código").upper()
+
+    @property
+    def codigo(self):
+        return self.__codigo
+
+    @abstractmethod
+    def describir(self):
+        pass
+
+
+class Cliente(Entidad):
+    def __init__(self, codigo, nombre, correo):
+        super().__init__(codigo)
+        self.__nombre = texto(nombre, "nombre")
+        if not any(letra.isalpha() for letra in self.__nombre):
+            raise DatoInvalido("El nombre debe contener letras.")
+        self.__correo = texto(correo, "correo")
+        if not re.fullmatch(r"[^@\s]+@[^@\s.]+(?:\.[^@\s.]+)+", self.__correo):
+            raise DatoInvalido("Formato de correo inválido.")
+
+    def describir(self):
+        return f"{self.codigo} | {self.__nombre} | {self.__correo}"
+
+
+class Servicio(Entidad):
+    def __init__(self, codigo, tarifa):
+        super().__init__(codigo)
+        self._tarifa = numero(tarifa, "Tarifa por hora", 1, 100000000)
+
+    @abstractmethod
+    def validar_parametros(self, horas):
+        pass
+
+    @abstractmethod
+    def costo_base(self, horas):
+        pass
+
+    def calcular_costo(self, horas, descuento=0, impuesto=0):
+        """Variantes mediante argumentos opcionales. El descuento se aplica primero."""
+        duracion = self.validar_parametros(horas)
+        rebaja = numero(descuento, "Descuento (%)", 0, 100)
+        iva = numero(impuesto, "Impuesto (%)", 0, 100)
+        total = self.costo_base(duracion) * (1 - rebaja / 100) * (1 + iva / 100)
+        return total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+class Sala(Servicio):
+    def validar_parametros(self, horas):
+        return numero(horas, "Horas de sala", 1, 12)
+
+    def costo_base(self, horas):
+        return self._tarifa * horas
+
+    def describir(self):
+        return f"{self.codigo} | Sala | {self._tarifa} COP/h"
+
+
+class Equipo(Servicio):
+    def validar_parametros(self, horas):
+        return numero(horas, "Horas de alquiler", 1, 72)
+
+    def costo_base(self, horas):
+        return self._tarifa * horas + 5000
+
+    def describir(self):
+        return f"{self.codigo} | Equipo | {self._tarifa} COP/h + 5000 COP de alistamiento"
+
+
+class Asesoria(Servicio):
+    def validar_parametros(self, horas):
+        return numero(horas, "Horas de asesoría", Decimal("0.5"), 8)
+
+    def costo_base(self, horas):
+        return self._tarifa * horas * Decimal("1.10")
+
+    def describir(self):
+        return f"{self.codigo} | Asesoría | {self._tarifa} COP/h + 10 % de preparación"
+
+
+class Reserva(Entidad):
+    def __init__(self, codigo, cliente, servicio, horas, descuento=0, impuesto=0):
+        super().__init__(codigo)
+        if not isinstance(cliente, Cliente) or not isinstance(servicio, Servicio):
+            raise DatoInvalido("La reserva requiere un cliente y un servicio.")
+        self.__cliente = cliente
+        self.__servicio = servicio
+        self.__horas = servicio.validar_parametros(horas)
+        self.__total = servicio.calcular_costo(self.__horas, descuento, impuesto)
+        self.__estado = "Pendiente"
+
+    @property
+    def servicio(self):
+        return self.__servicio
+
+    @property
+    def estado(self):
+        return self.__estado
+
+    def confirmar(self):
+        self._cambiar(("Pendiente",), "Confirmada")
+
+    def cancelar(self):
+        self._cambiar(("Pendiente", "Confirmada"), "Cancelada")
+
+    def procesar(self):
+        self._cambiar(("Confirmada",), "Procesada")
+
+    def _cambiar(self, permitidos, destino):
+        if self.estado not in permitidos:
+            raise OperacionInvalida(f"No se admite pasar de {self.estado} a {destino}.")
+        self.__estado = destino
+
+    def describir(self):
+        return (f"{self.codigo} | Cliente {self.__cliente.codigo} | Servicio "
+                f"{self.servicio.codigo} | {self.__horas} h | {self.__total} COP | {self.estado}")
